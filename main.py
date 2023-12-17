@@ -1,49 +1,60 @@
-from typing import Any
+import asyncio
+import aiohttp
+import json
+import logging
 import time
-import requests
 
-BASE_URL = "https://httpbin.org"
+logging.basicConfig(level=logging.INFO)
 
+class HTTPClient:
+    BASE_URL = "https://httpbin.org"
 
-def fetch_get(session: requests.Session) -> Any:
-    """Realiza uma requisição GET e retorna os dados em formato JSON."""
-    response = session.get(f"{BASE_URL}/get")
-    return response.json()
+    def __init__(self):
+        self.session = aiohttp.ClientSession()
 
+    async def close_session(self):
+        await self.session.close()
 
-def fetch_post(session: requests.Session) -> Any:
-    """Realiza uma requisição POST e retorna os dados em formato JSON."""
-    data_to_post = {"key": "value"}
-    response = session.post(f"{BASE_URL}/post", json=data_to_post)
-    return response.json()
+    async def make_request(self, method, endpoint, data=None):
+        url = f"{self.BASE_URL}/{endpoint}"
+        headers = {'Content-Type': 'application/json'}
 
+        try:
+            async with self.session.request(method, url, json=data, headers=headers) as response:
+                response_data = await response.json()
+                response.raise_for_status()
+                return response_data
+        except aiohttp.ClientError as e:
+            logging.error(f"Erro ao fazer requisição {method} {endpoint}: {e}")
+            return None
 
-def fetch_put(session: requests.Session) -> Any:
-    """Realiza uma requisição PUT e retorna os dados em formato JSON."""
-    data_to_put = {"key": "updated_value"}
-    response = session.put(f"{BASE_URL}/put", json=data_to_put)
-    return response.json()
+    async def execute_requests(self, requests_list):
+        tasks = [self.make_request(req_data['method'], req_data['endpoint'], req_data.get('data'))
+                 for req_name, req_data in requests_list.items()]
+        return await asyncio.gather(*tasks)
 
-
-def fetch_delete(session: requests.Session) -> Any:
-    """Realiza uma requisição DELETE e retorna os dados em formato JSON."""
-    response = session.delete(f"{BASE_URL}/delete")
-    return response.json()
-
-
-def main() -> None:
-    """Função principal para realizar chamadas e medir o tempo de execução."""
+async def main():
     start = time.perf_counter()
 
-    with requests.Session() as session:
-        print(fetch_get(session))
-        print(fetch_post(session))
-        print(fetch_put(session))
-        print(fetch_delete(session))
+    client = HTTPClient()
+
+    requests_list = {
+        'GET': {'method': 'GET', 'endpoint': 'get'},
+        'POST': {'method': 'POST', 'endpoint': 'post', 'data': {"key": "value"}},
+        'PUT': {'method': 'PUT', 'endpoint': 'put', 'data': {"key": "updated_value"}},
+        'DELETE': {'method': 'DELETE', 'endpoint': 'delete'}
+    }
+
+    responses = await client.execute_requests(requests_list)
+
+    for response in responses:
+        if response:
+            logging.info(f"Response: {response}")
+
+    await client.close_session()
 
     end = time.perf_counter()
-    print(f"Tempo decorrido: {end - start:.2f} segundos.")
-
+    logging.info(f"Tempo decorrido: {end - start:.2f} segundos.")
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
